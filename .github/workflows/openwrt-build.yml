@@ -1,0 +1,38 @@
+name: Build OpenWRT for New3 (MT7621)
+
+on:
+  workflow_dispatch:  # 手动触发编译
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04  # 云端编译环境
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          repository: coolsnowwolf/lede  # 使用Lean的OpenWRT源码
+          submodules: true
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load custom configuration
+        run: |
+          # 复制仓库中已有的.config到编译目录
+          cp .config .config
+          # 检查配置（自动补全依赖）
+          make defconfig
+
+      - name: Download packages
+        run: make download -j8
+
+      - name: Compile firmware
+        run: make -j$(nproc) || make -j1 V=s  # 多线程编译，失败则单线程输出日志
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-new3-firmware
+          path: bin/targets/ramips/mt7621/  # 固件输出目录
