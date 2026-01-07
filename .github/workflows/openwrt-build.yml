@@ -21,7 +21,7 @@ jobs:
       - name: Load custom configuration
         run: |
           # 复制仓库中已有的.config到编译目录
-          cp .config .config
+          # cp .config .config
           # 检查配置（自动补全依赖）
           make defconfig
 
