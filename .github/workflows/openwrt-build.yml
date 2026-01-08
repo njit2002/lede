@@ -6,6 +6,7 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      # 步骤1：清理磁盘+安装依赖
       - name: Clean disk & install dependencies
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
@@ -14,12 +15,14 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libtool automake autoconf bison flex
           df -h
 
+      # 步骤2：拉取源码
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           repository: coolsnowwolf/lede
           submodules: true
 
+      # 步骤3：更新feeds+清理缓存
       - name: Update feeds & clean cache
         run: |
           ./scripts/feeds clean
@@ -28,69 +31,92 @@ jobs:
           rm -rf feeds/packages/devel/pcre2/{build_dir,stamp}
           rm -rf dl/pcre2-*
 
-      - name: Generate New3 config
+      # 步骤4：生成New3配置（核心：用echo逐行追加，无EOF）
+      - name: Generate New3 config file
         run: |
-          # 强制生成New3架构配置（覆盖默认x86）
+          # 1. 基础架构配置（强制指定new3，覆盖x86默认）
           echo "CONFIG_TARGET_ramips=y" > .config
           echo "CONFIG_TARGET_ramips_mt7621=y" >> .config
           echo "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" >> .config
-          # 追加核心功能配置（EOF必须单独一行，无多余空格）
-          cat >> .config << EOF
-CONFIG_PACKAGE_base-files=y
-CONFIG_PACKAGE_busybox=y
-CONFIG_PACKAGE_dropbear=y
-CONFIG_PACKAGE_firewall=y
-CONFIG_PACKAGE_odhcpd-ipv6only=y
-CONFIG_PACKAGE_opkg=y
-CONFIG_PACKAGE_wpad-basic-mbedtls=y
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-mod-admin-full=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
-CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-CONFIG_PACKAGE_kmod-wireguard=y
-CONFIG_PACKAGE_wireguard-tools=y
-CONFIG_PACKAGE_luci-app-wireguard=y
-CONFIG_PACKAGE_luci-i18n-wireguard-zh-cn=y
-CONFIG_PACKAGE_kmod-usb-core=y
-CONFIG_PACKAGE_kmod-usb2=y
-CONFIG_PACKAGE_kmod-usb3=y
-CONFIG_PACKAGE_usb-modeswitch=y
-CONFIG_PACKAGE_kmod-usb-net=y
-CONFIG_PACKAGE_kmod-usb-net-rtl8152=y
-CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
-CONFIG_PACKAGE_uqmi=y
-CONFIG_PACKAGE_ppp=y
-CONFIG_PACKAGE_ppp-mod-pppoe=y
-CONFIG_PACKAGE_usbutils=y
-CONFIG_PACKAGE_linux-atm=n
-CONFIG_PACKAGE_kmod-atm=n
-EOF
+          
+          # 2. 系统核心组件
+          echo "CONFIG_PACKAGE_base-files=y" >> .config
+          echo "CONFIG_PACKAGE_busybox=y" >> .config
+          echo "CONFIG_PACKAGE_dropbear=y" >> .config
+          echo "CONFIG_PACKAGE_firewall=y" >> .config
+          echo "CONFIG_PACKAGE_odhcpd-ipv6only=y" >> .config
+          echo "CONFIG_PACKAGE_opkg=y" >> .config
+          echo "CONFIG_PACKAGE_wpad-basic-mbedtls=y" >> .config
+          
+          # 3. LuCI中文界面
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo "CONFIG_PACKAGE_luci-base=y" >> .config
+          echo "CONFIG_PACKAGE_luci-mod-admin-full=y" >> .config
+          echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+          
+          # 4. WireGuard组件
+          echo "CONFIG_PACKAGE_kmod-wireguard=y" >> .config
+          echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-wireguard-zh-cn=y" >> .config
+          
+          # 5. USB随身WiFi驱动
+          echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb3=y" >> .config
+          echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net-rtl8152=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y" >> .config
+          
+          # 6. 4G拨号工具
+          echo "CONFIG_PACKAGE_uqmi=y" >> .config
+          echo "CONFIG_PACKAGE_ppp=y" >> .config
+          echo "CONFIG_PACKAGE_ppp-mod-pppoe=y" >> .config
+          
+          # 7. 调试工具+禁用冲突组件
+          echo "CONFIG_PACKAGE_usbutils=y" >> .config
+          echo "CONFIG_PACKAGE_linux-atm=n" >> .config
+          echo "CONFIG_PACKAGE_kmod-atm=n" >> .config
+          
+          # 8. 自动补全依赖
           make defconfig
 
-      - name: Verify config
+      # 步骤5：验证架构配置
+      - name: Verify architecture config
         run: |
-          grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" .config || (echo "Config error"; exit 1)
-          echo "✅ Config OK"
+          if ! grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" .config; then
+            echo "Error: New3 architecture config missing!"
+            exit 1
+          fi
+          echo "✅ New3 config verified successfully"
 
-      - name: Add swap
+      # 步骤6：添加4G交换分区（缓解内存不足）
+      - name: Add swap space
         run: |
           sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+          swapon --show
 
+      # 步骤7：下载依赖包
       - name: Download packages
         run: make download -j8
 
+      # 步骤8：编译固件
       - name: Compile firmware
         run: make -j$(nproc) || make -j1 V=s
 
-      - name: Check firmware
+      # 步骤9：检查固件生成
+      - name: Check firmware files
         run: |
-          ls -l bin/targets/ramips/mt7621/
+          echo "📝 Firmware files list:"
+          ls -l bin/targets/ramips/mt7621/ || echo "No firmware files found"
           ls -l bin/targets/
 
+      # 步骤10：上传固件
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
