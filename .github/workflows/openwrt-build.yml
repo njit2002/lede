@@ -28,14 +28,14 @@ jobs:
           rm -rf feeds/packages/devel/pcre2/{build_dir,stamp}
           rm -rf dl/pcre2-*
 
-      - name: Generate New3 config file
+      - name: Generate New3 config
         run: |
-          # 强制生成New3架构配置
+          # 强制生成New3架构配置（覆盖默认x86）
           echo "CONFIG_TARGET_ramips=y" > .config
           echo "CONFIG_TARGET_ramips_mt7621=y" >> .config
           echo "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" >> .config
-          # 追加核心功能配置
-          cat >> .config << 'EOF'
+          # 追加核心功能配置（EOF必须单独一行，无多余空格）
+          cat >> .config << EOF
 CONFIG_PACKAGE_base-files=y
 CONFIG_PACKAGE_busybox=y
 CONFIG_PACKAGE_dropbear=y
@@ -43,18 +43,15 @@ CONFIG_PACKAGE_firewall=y
 CONFIG_PACKAGE_odhcpd-ipv6only=y
 CONFIG_PACKAGE_opkg=y
 CONFIG_PACKAGE_wpad-basic-mbedtls=y
-# LuCI中文界面
 CONFIG_PACKAGE_luci=y
 CONFIG_PACKAGE_luci-base=y
 CONFIG_PACKAGE_luci-mod-admin-full=y
 CONFIG_PACKAGE_luci-theme-bootstrap=y
 CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-# WireGuard组件
 CONFIG_PACKAGE_kmod-wireguard=y
 CONFIG_PACKAGE_wireguard-tools=y
 CONFIG_PACKAGE_luci-app-wireguard=y
 CONFIG_PACKAGE_luci-i18n-wireguard-zh-cn=y
-# USB随身WiFi驱动
 CONFIG_PACKAGE_kmod-usb-core=y
 CONFIG_PACKAGE_kmod-usb2=y
 CONFIG_PACKAGE_kmod-usb3=y
@@ -62,44 +59,36 @@ CONFIG_PACKAGE_usb-modeswitch=y
 CONFIG_PACKAGE_kmod-usb-net=y
 CONFIG_PACKAGE_kmod-usb-net-rtl8152=y
 CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
-# 4G拨号工具
 CONFIG_PACKAGE_uqmi=y
 CONFIG_PACKAGE_ppp=y
 CONFIG_PACKAGE_ppp-mod-pppoe=y
-# 调试工具
 CONFIG_PACKAGE_usbutils=y
-# 禁用冲突组件
 CONFIG_PACKAGE_linux-atm=n
 CONFIG_PACKAGE_kmod-atm=n
 EOF
           make defconfig
 
-      - name: Verify architecture config
+      - name: Verify config
         run: |
-          if ! grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" .config; then
-            echo "Error: New3 config not found!"
-            exit 1
-          fi
-          echo "✅ Config verified"
+          grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" .config || (echo "Config error"; exit 1)
+          echo "✅ Config OK"
 
-      - name: Add swap space
+      - name: Add swap
         run: |
           sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
-          swapon --show
 
-      - name: Download dependencies
+      - name: Download packages
         run: make download -j8
 
       - name: Compile firmware
         run: make -j$(nproc) || make -j1 V=s
 
-      - name: Check firmware files
+      - name: Check firmware
         run: |
-          echo "📝 Firmware files:"
-          ls -l bin/targets/ramips/mt7621/ || echo "No files found"
+          ls -l bin/targets/ramips/mt7621/
           ls -l bin/targets/
 
       - name: Upload firmware
