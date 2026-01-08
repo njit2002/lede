@@ -1,56 +1,41 @@
 name: Build OpenWRT for New3 (MT7621)
-
-# 仅手动触发编译
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    # 指定编译环境为Ubuntu 22.04
     runs-on: ubuntu-22.04
     steps:
-      # 步骤1：清理磁盘空间 + 安装编译依赖（核心）
-      - name: Clean disk space & fix dependencies
+      - name: Clean disk & install dependencies
         run: |
-          # 清理大体积无用组件，释放磁盘空间
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get clean
           docker rmi $(docker images -q) 2>/dev/null
-          # 安装编译必需依赖，修复linux-atm/pcre2编译环境
           sudo apt-get update && sudo apt-get install -y libtool automake autoconf bison flex
-          # 查看清理后磁盘空间
           df -h
 
-      # 步骤2：拉取Lean的lede源码
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           repository: coolsnowwolf/lede
           submodules: true
 
-      # 步骤3：更新feeds + 清理pcre2缓存（修复编译失败）
       - name: Update feeds & clean cache
         run: |
           ./scripts/feeds clean
           ./scripts/feeds update -a -f
           ./scripts/feeds install -a -f
-          # 强制清理pcre2的编译缓存和下载文件，避免版本冲突
           rm -rf feeds/packages/devel/pcre2/{build_dir,stamp}
           rm -rf dl/pcre2-*
 
-      # 步骤4：强制生成New3的.config配置（核心修复：YAML语法+架构配置）
-      - name: Copy custom config (Force load New3 config)
+      - name: Generate New3 config file
         run: |
-          # 备份旧配置（若有）
-          if [ -f .config ]; then
-            cp .config .config.bak
-          fi
-          # 强制生成New3（ramips/mt7621）基础架构配置，覆盖默认x86
+          # 强制生成New3架构配置
           echo "CONFIG_TARGET_ramips=y" > .config
           echo "CONFIG_TARGET_ramips_mt7621=y" >> .config
           echo "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" >> .config
-          # 追加核心功能配置（WireGuard + USB随身WiFi + 中文LuCI）
-          cat >> .config << EOF
+          # 追加核心功能配置
+          cat >> .config << 'EOF'
 CONFIG_PACKAGE_base-files=y
 CONFIG_PACKAGE_busybox=y
 CONFIG_PACKAGE_dropbear=y
@@ -64,12 +49,12 @@ CONFIG_PACKAGE_luci-base=y
 CONFIG_PACKAGE_luci-mod-admin-full=y
 CONFIG_PACKAGE_luci-theme-bootstrap=y
 CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-# WireGuard全套组件
+# WireGuard组件
 CONFIG_PACKAGE_kmod-wireguard=y
 CONFIG_PACKAGE_wireguard-tools=y
 CONFIG_PACKAGE_luci-app-wireguard=y
 CONFIG_PACKAGE_luci-i18n-wireguard-zh-cn=y
-# USB随身WiFi核心驱动
+# USB随身WiFi驱动
 CONFIG_PACKAGE_kmod-usb-core=y
 CONFIG_PACKAGE_kmod-usb2=y
 CONFIG_PACKAGE_kmod-usb3=y
@@ -77,61 +62,49 @@ CONFIG_PACKAGE_usb-modeswitch=y
 CONFIG_PACKAGE_kmod-usb-net=y
 CONFIG_PACKAGE_kmod-usb-net-rtl8152=y
 CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
-# 4G拨号核心工具
+# 4G拨号工具
 CONFIG_PACKAGE_uqmi=y
 CONFIG_PACKAGE_ppp=y
 CONFIG_PACKAGE_ppp-mod-pppoe=y
 # 调试工具
 CONFIG_PACKAGE_usbutils=y
-# 禁用冲突组件（修复linux-atm编译失败）
+# 禁用冲突组件
 CONFIG_PACKAGE_linux-atm=n
 CONFIG_PACKAGE_kmod-atm=n
 EOF
-          # 自动补全配置依赖
           make defconfig
 
-      # 步骤5：验证架构配置是否正确（防止编译错架构）
-      - name: Verify target architecture
+      - name: Verify architecture config
         run: |
-          # 检查.config中是否包含New3的架构配置
-          if ! grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" .config; then
-            echo "Error: New3 target config not found!"
+          if ! grep -q "CONFIG_TARGET_ramips_mt7621_DEVICE_newifi-d2=y" .config; then
+            echo "Error: New3 config not found!"
             exit 1
           fi
-          echo "✅ New3 architecture config verified successfully!"
+          echo "✅ Config verified"
 
-      # 步骤6：添加4G交换分区（缓解内存不足）
       - name: Add swap space
         run: |
           sudo fallocate -l 4G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
-          # 验证swap是否生效
           swapon --show
 
-      # 步骤7：下载编译依赖包
-      - name: Download packages
+      - name: Download dependencies
         run: make download -j8
 
-      # 步骤8：编译固件（多线程优先，失败则单线程输出日志）
       - name: Compile firmware
         run: make -j$(nproc) || make -j1 V=s
 
-      # 步骤9：验证固件是否生成（关键）
       - name: Check firmware files
         run: |
-          # 列出ramips/mt7621目录下的文件（确认New3固件生成）
-          echo "📝 Firmware files in ramips/mt7621:"
-          ls -l bin/targets/ramips/mt7621/
-          # 列出所有固件目录，确认架构
-          echo -e "\n📝 All target directories:"
+          echo "📝 Firmware files:"
+          ls -l bin/targets/ramips/mt7621/ || echo "No files found"
           ls -l bin/targets/
 
-      # 步骤10：上传固件（仅当文件存在时）
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-new3-firmware
           path: bin/targets/ramips/mt7621/
-          if-no-files-found: error  # 固件为空时直接报错，便于排查
+          if-no-files-found: error
